@@ -152,19 +152,46 @@ def manifest(tag):
     print(f"Validated {len(archives)} archives for {tag}")
 
 
+def verify(directory):
+    expected = {archive_name(target) for target in TARGETS} | {"build-info.json"}
+    seen = set()
+    for line in (directory / "checksums.txt").read_text(encoding="utf-8").splitlines():
+        digest, name = line.split("  ", 1)
+        if name not in expected or name in seen:
+            raise ValueError(f"Unexpected or repeated checksum entry: {name}")
+        actual = hashlib.sha256((directory / name).read_bytes()).hexdigest()
+        if actual != digest:
+            raise ValueError(f"Checksum mismatch: {name}")
+        seen.add(name)
+    if seen != expected:
+        raise ValueError(f"Missing checksum entries: {expected - seen}")
+    metadata = json.loads((directory / "build-info.json").read_text(encoding="utf-8"))
+    targets = metadata["targets"]
+    if len(targets) != len(TARGETS) or {item["target"] for item in targets} != set(TARGETS):
+        raise ValueError("Manifest does not describe the five expected targets")
+    for item in targets:
+        if item["asset"] != archive_name(item["target"]):
+            raise ValueError(f"Unexpected asset: {item['asset']}")
+        verify_archive(directory / item["asset"], item["binarySha256"])
+    print(f"PASS {metadata['tag']}: all five archives, binary hashes and manifest")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("smoke").add_argument("binary", type=Path)
     commands.add_parser("package").add_argument("--target", choices=TARGETS, required=True)
     commands.add_parser("manifest").add_argument("--tag", required=True)
+    commands.add_parser("verify").add_argument("directory", type=Path)
     args = parser.parse_args()
     if args.command == "smoke":
         smoke(args.binary)
     elif args.command == "package":
         package(args.target)
-    else:
+    elif args.command == "manifest":
         manifest(args.tag)
+    else:
+        verify(args.directory)
 
 
 if __name__ == "__main__":
