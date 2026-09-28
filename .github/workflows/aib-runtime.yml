@@ -1,0 +1,116 @@
+name: AIB runtime
+
+on:
+  push:
+    branches: [codex/aib-runtime]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'Cargo.*'
+      - 'build.rs'
+      - 'scripts/aib/**'
+      - '.github/workflows/aib-runtime.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a prerelease after all five builds pass
+        type: boolean
+        default: false
+      tag:
+        description: New prerelease tag, for example v0.42.3-aib.1
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aib-runtime-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RTK_TELEMETRY_DISABLED: '1'
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    timeout-minutes: 35
+    runs-on: ${{ matrix.os }}
+    env:
+      RTK_DB_PATH: ${{ runner.temp }}/rtk-history.db
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: aarch64-apple-darwin
+            os: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: aib-${{ matrix.target }}
+          cache-on-failure: true
+      - name: Install musl compiler
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Git unit tests
+        run: cargo test --locked --target ${{ matrix.target }} --bin rtk cmds::git::git::tests -- --test-threads=1
+      - name: Tracking unit tests
+        run: cargo test --locked --target ${{ matrix.target }} --bin rtk core::tracking::tests -- --test-threads=1
+      - name: Build release
+        run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: Smoke and package release binary
+        run: python scripts/aib/runtime.py package --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rtk-${{ matrix.target }}
+          path: .tmp/aib-release/*
+          if-no-files-found: error
+          retention-days: 3
+
+  release:
+    name: Publish verified prerelease
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: rtk-*
+          merge-multiple: true
+          path: .tmp/aib-release
+      - name: Validate release inputs and write manifest
+        run: python scripts/aib/runtime.py manifest --tag "$RELEASE_TAG"
+      - name: Create prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" .tmp/aib-release/* \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "RTK $RELEASE_TAG for AIB" \
+            --notes-file scripts/aib/release-notes.md

@@ -1,0 +1,12 @@
+{
+  "pathAliases": {
+    "core": "src/core",
+    "git": "src/cmds/git",
+    "cmd": "src/cmds",
+    "stats": "src/analytics",
+    "ci": ".github/workflows",
+    "tool": "scripts/aib"
+  },
+  "inspect.tree.files.exclude": ["target"],
+  "inspect.tree.onlyDirs.exclude": ["target"]
+}
