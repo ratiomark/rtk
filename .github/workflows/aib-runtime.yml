@@ -37,8 +37,6 @@ jobs:
     name: ${{ matrix.target }}
     timeout-minutes: 35
     runs-on: ${{ matrix.os }}
-    env:
-      RTK_DB_PATH: ${{ runner.temp }}/rtk-history.db
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +53,9 @@ jobs:
             os: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Isolate tracking database
+        shell: bash
+        run: echo "RTK_DB_PATH=$RUNNER_TEMP/rtk-history.db" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
