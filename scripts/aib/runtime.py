@@ -51,6 +51,8 @@ def smoke(binary):
         repo = root / "repo"
         repo.mkdir()
         env = dict(os.environ)
+        for key in ("RTK_AIB", "RTK_AIB_EXPORT_PATH", "RTK_AIB_JSON", "RTK_TRACKING_DISABLED"):
+            env.pop(key, None)
         env.update({
             "RTK_TELEMETRY_DISABLED": "1",
             "RTK_DB_PATH": str(root / "history.db"),
@@ -76,15 +78,48 @@ def smoke(binary):
             (["git", "diff"], "changed-by-smoke"),
             (["git", "log", "-1"], "baseline smoke"),
         )
-        for args, expected in cases:
+        for index, (args, expected) in enumerate(cases):
             output = run([binary, *args], repo, env)
             if expected not in output:
                 raise RuntimeError(f"Missing {expected!r} in {args}: {output[:1200]}")
+            evidence_path = root / f"evidence-{index}.json"
+            export_env = {
+                **env,
+                "RTK_AIB": "1",
+                "RTK_TRACKING_DISABLED": "1",
+                "RTK_AIB_EXPORT_PATH": str(evidence_path),
+            }
+            captured = subprocess.run(
+                [str(binary), *args], cwd=repo, env=export_env,
+                capture_output=True, text=True, encoding="utf-8", timeout=90,
+            )
+            if captured.returncode or captured.stdout != output:
+                raise RuntimeError(f"File export changed output or exit status: {args}")
+            if "No hook installed" in captured.stderr or "Hook outdated" in captured.stderr:
+                raise RuntimeError(f"AIB invocation emitted hook warning: {args}")
+            evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+            comparison = evidence["comparison"]
+            original = run(["git", *comparison["gitArgs"]], repo, env)
+            if evidence["version"] != 1 or comparison["original"].replace("\r\n", "\n") != original:
+                raise RuntimeError(f"Evidence differs from captured Git command: {args}")
+            # Existing destinations must neither be overwritten nor break the command.
+            saved = evidence_path.read_bytes()
+            if run([binary, *args], repo, export_env) != output or evidence_path.read_bytes() != saved:
+                raise RuntimeError(f"Occupied export destination changed result: {args}")
+        error_args = [str(binary), "git", "diff", "--bad-aib-smoke-option"]
+        error_env = {**env, "RTK_AIB": "1", "RTK_TRACKING_DISABLED": "1"}
+        plain_error = subprocess.run(error_args, cwd=repo, env=error_env, capture_output=True, timeout=90)
+        export_env = {**error_env, "RTK_AIB_EXPORT_PATH": str(root / "error.json")}
+        export_error = subprocess.run(error_args, cwd=repo, env=export_env, capture_output=True, timeout=90)
+        if not plain_error.returncode or (
+            plain_error.returncode, plain_error.stdout, plain_error.stderr
+        ) != (export_error.returncode, export_error.stdout, export_error.stderr):
+            raise RuntimeError("File export changed Git error output or exit status")
         with closing(sqlite3.connect(root / "history.db")) as database:
             rows = database.execute("SELECT COUNT(*) FROM commands").fetchone()[0]
             if rows != len(cases):
                 raise RuntimeError(f"Expected {len(cases)} tracking rows, got {rows}")
-        print(f"PASS {version}: startup, Git status/diff/log, {rows} tracking rows")
+        print(f"PASS {version}: startup, Git status/diff/log, file evidence, errors, {rows} tracking rows")
 
 
 def package(target):
