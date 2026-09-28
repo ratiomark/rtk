@@ -88,6 +88,10 @@ fn binary_hook_registered(claude_dir: &std::path::Path) -> bool {
 
 /// Check if the installed hook is missing or outdated, warn once per day.
 pub fn maybe_warn() {
+    // AIB invokes RTK explicitly; automatic command-rewriting hooks aren't needed.
+    if std::env::var("RTK_AIB").as_deref() == Ok("1") {
+        return;
+    }
     // Don't block startup — fail silently on any error
     let _ = check_and_warn();
 }
