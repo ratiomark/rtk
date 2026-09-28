@@ -59,6 +59,9 @@ def smoke(binary):
             "RTK_TEE_DIR": str(root / "tee"),
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
+            # RTK log includes %ar; fresh commits can age between parity calls.
+            "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
+            "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
             "NO_COLOR": "1",
         })
         version = run([binary, "--version"], repo, env).strip()
@@ -104,8 +107,11 @@ def smoke(binary):
                 raise RuntimeError(f"Evidence differs from captured Git command: {args}")
             # Existing destinations must neither be overwritten nor break the command.
             saved = evidence_path.read_bytes()
-            if run([binary, *args], repo, export_env) != output or evidence_path.read_bytes() != saved:
-                raise RuntimeError(f"Occupied export destination changed result: {args}")
+            occupied_output = run([binary, *args], repo, export_env)
+            if occupied_output != output:
+                raise RuntimeError(f"Occupied export changed stdout: {args}: {output!r} -> {occupied_output!r}")
+            if evidence_path.read_bytes() != saved:
+                raise RuntimeError(f"Occupied export destination was overwritten: {args}")
         error_args = [str(binary), "git", "diff", "--bad-aib-smoke-option"]
         error_env = {**env, "RTK_AIB": "1", "RTK_TRACKING_DISABLED": "1"}
         plain_error = subprocess.run(error_args, cwd=repo, env=error_env, capture_output=True, timeout=90)
