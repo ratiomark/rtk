@@ -1257,6 +1257,9 @@ pub struct ParseFailureSummary {
 /// Record a parse failure without ever crashing.
 /// Silently ignores all errors — used in the fallback path.
 pub fn record_parse_failure_silent(raw_command: &str, error_message: &str, succeeded: bool) {
+    if tracking_disabled() {
+        return;
+    }
     if let Ok(tracker) = Tracker::new() {
         let _ = tracker.record_parse_failure(raw_command, error_message, succeeded);
     }
@@ -1307,6 +1310,10 @@ pub struct TimedExecution {
     start: Instant,
 }
 
+fn tracking_disabled() -> bool {
+    std::env::var_os("RTK_TRACKING_DISABLED").is_some_and(|value| value == "1")
+}
+
 impl TimedExecution {
     /// Start timing a command execution.
     ///
@@ -1354,6 +1361,9 @@ impl TimedExecution {
     /// timer.track("ls -la", "rtk ls", input, output);
     /// ```
     pub fn track(&self, original_cmd: &str, rtk_cmd: &str, input: &str, output: &str) {
+        if tracking_disabled() {
+            return;
+        }
         let elapsed_ms = self.start.elapsed().as_millis() as u64;
         let input_tokens = estimate_tokens(input);
         let output_tokens = estimate_tokens(output);
@@ -1390,6 +1400,9 @@ impl TimedExecution {
     /// timer.track_passthrough("git tag", "rtk git tag");
     /// ```
     pub fn track_passthrough(&self, original_cmd: &str, rtk_cmd: &str) {
+        if tracking_disabled() {
+            return;
+        }
         let elapsed_ms = self.start.elapsed().as_millis() as u64;
         // input_tokens=0, output_tokens=0 won't dilute savings statistics
         if let Ok(tracker) = Tracker::new() {

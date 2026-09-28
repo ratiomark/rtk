@@ -134,6 +134,7 @@ fn run_diff(
         }
 
         let result = exec_capture(&mut cmd).context("Failed to run git diff")?;
+        super::file_export::export(&result, &cmd);
 
         if !result.success() {
             eprintln!("{}", result.stderr);
@@ -163,6 +164,7 @@ fn run_diff(
     let result = exec_capture(&mut cmd).context("Failed to run git diff")?;
 
     if !result.success() {
+        super::file_export::export(&result, &cmd);
         if !result.stderr.trim().is_empty() {
             eprint!("{}", result.stderr);
         }
@@ -190,6 +192,7 @@ fn run_diff(
     }
 
     let diff_result = exec_capture(&mut diff_cmd).context("Failed to run git diff")?;
+    super::file_export::export(&diff_result, &diff_cmd);
 
     let mut final_output = result.stdout.clone();
     if !diff_result.stdout.is_empty() {
@@ -477,6 +480,7 @@ fn run_log(
     }
 
     let result = exec_capture(&mut cmd).context("Failed to run git log")?;
+    super::file_export::export(&result, &cmd);
 
     if !result.success() {
         eprintln!("{}", result.stderr);
@@ -820,6 +824,7 @@ fn run_status(args: &[String], verbose: u8, global_args: &[String]) -> Result<i3
     if !uses_compact_status_path(args) {
         let mut cmd = build_status_command(args, global_args);
         let result = exec_capture(&mut cmd).context("Failed to run git status")?;
+        super::file_export::export(&result, &cmd);
 
         if !result.success() {
             if !result.stderr.trim().is_empty() {
@@ -856,7 +861,10 @@ fn run_status(args: &[String], verbose: u8, global_args: &[String]) -> Result<i3
     raw_cmd.arg("status");
     raw_cmd.args(args);
     let raw_output = exec_capture(&mut raw_cmd)
-        .map(|r| r.stdout)
+        .map(|r| {
+            super::file_export::export(&r, &raw_cmd);
+            r.stdout
+        })
         .unwrap_or_default();
 
     let mut cmd = build_status_command(args, global_args);
